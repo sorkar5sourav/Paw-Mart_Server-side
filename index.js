@@ -26,10 +26,69 @@ async function run() {
 
     const database = client.db("Paw-Mart-Listing");
     const listingsCollection = database.collection("Listings");
+    const ordersCollection = database.collection("Orders");
 
     app.get("/listings", async (req, res) => {
       const result = await listingsCollection.find().toArray();
       res.send(result);
+    });
+
+    // Create a new listing
+    app.post("/listings", async (req, res) => {
+      try {
+        const {
+          name,
+          category,
+          price,
+          location,
+          description,
+          imageUrl,
+          pickupDate,
+          email,
+          userId,
+          userName
+        } = req.body;
+
+        // Validation
+        if (!name || !category || !location || !description || !imageUrl || !pickupDate || !email) {
+          return res.status(400).json({ 
+            message: "Missing required fields: name, category, location, description, imageUrl, pickupDate, email" 
+          });
+        }
+
+        // Transform data to match MongoDB structure
+        const listingData = {
+          name: name,
+          category: category,
+          Price: typeof price === "number" ? price : parseInt(price) || 0,
+          location: location,
+          description: description,
+          image: imageUrl, // Transform imageUrl to image
+          email: email,
+          date: pickupDate, // Transform pickupDate to date
+          userId: userId || null,
+          userName: userName || null
+        };
+
+        const result = await listingsCollection.insertOne(listingData);
+        
+        if (result.insertedId) {
+          // Fetch the created listing to return it
+          const createdListing = await listingsCollection.findOne({ _id: result.insertedId });
+          res.status(201).json({
+            message: "Listing created successfully",
+            listing: createdListing
+          });
+        } else {
+          res.status(500).json({ message: "Failed to create listing" });
+        }
+      } catch (error) {
+        console.error("Error creating listing:", error);
+        res.status(500).json({ 
+          message: "Error creating listing", 
+          error: error.message 
+        });
+      }
     });
 
     app.get("/listings/:id", async (req, res) => {
@@ -100,6 +159,66 @@ async function run() {
       } catch (error) {
         console.error("Error fetching listing:", error);
         res.status(500).json({ message: "Error fetching listing", error: error.message });
+      }
+    });
+
+    // Create a new order
+    app.post("/orders", async (req, res) => {
+      try {
+        const {
+          buyerName,
+          email,
+          listingId,
+          listingName,
+          quantity,
+          price,
+          address,
+          pickupDate,
+          phone,
+          notes,
+        } = req.body;
+
+        if (!buyerName || !email || !listingId || !listingName || !quantity || !price || !address || !pickupDate || !phone) {
+          return res.status(400).json({
+            message: "Missing required fields for creating an order.",
+          });
+        }
+
+        let listingObjectId = null;
+        try {
+          listingObjectId = new ObjectId(listingId);
+        } catch (error) {
+          // ignore invalid ObjectId, store as plain string fallback
+        }
+
+        const orderDoc = {
+          buyerName,
+          email,
+          listingId: listingObjectId || listingId,
+          listingName,
+          quantity: parseInt(quantity, 10) || 1,
+          price: typeof price === "number" ? price : parseFloat(price) || 0,
+          address,
+          pickupDate,
+          phone,
+          notes: notes || "",
+          status: "pending",
+          createdAt: new Date(),
+        };
+
+        const result = await ordersCollection.insertOne(orderDoc);
+        if (!result.insertedId) {
+          return res.status(500).json({ message: "Failed to create order" });
+        }
+
+        const createdOrder = await ordersCollection.findOne({ _id: result.insertedId });
+        res.status(201).json({
+          message: "Order created successfully",
+          order: createdOrder,
+        });
+      } catch (error) {
+        console.error("Error creating order:", error);
+        res.status(500).json({ message: "Error creating order", error: error.message });
       }
     });
 
