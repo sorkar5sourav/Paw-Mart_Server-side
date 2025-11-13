@@ -22,7 +22,7 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
 
     const database = client.db("Paw-Mart-Listing");
     const listingsCollection = database.collection("Listings");
@@ -73,7 +73,10 @@ async function run() {
         listingId: order.listingId?.toString?.() || order.listingId || "",
         listingName: order.listingName || "",
         quantity: order.quantity || 1,
-        price: typeof order.price === "number" ? order.price : parseFloat(order.price) || 0,
+        price:
+          typeof order.price === "number"
+            ? order.price
+            : parseFloat(order.price) || 0,
         address: order.address || "",
         pickupDate: order.pickupDate || "",
         phone: order.phone || "",
@@ -102,17 +105,27 @@ async function run() {
           pickupDate,
           email,
           userId,
-          userName
+          userName,
         } = req.body;
 
         // Validation
-        if (!name || !category || !location || !description || !imageUrl || !pickupDate || !email) {
-          return res.status(400).json({ 
-            message: "Missing required fields: name, category, location, description, imageUrl, pickupDate, email" 
+        if (
+          !name ||
+          !category ||
+          !location ||
+          !description ||
+          !imageUrl ||
+          !pickupDate ||
+          !email
+        ) {
+          return res.status(400).json({
+            message:
+              "Missing required fields: name, category, location, description, imageUrl, pickupDate, email",
           });
         }
 
-        const numericPrice = typeof price === "number" ? price : parseFloat(price) || 0;
+        const numericPrice =
+          typeof price === "number" ? price : parseFloat(price) || 0;
 
         // Transform data to match MongoDB structure
         const listingData = {
@@ -132,9 +145,11 @@ async function run() {
         };
 
         const result = await listingsCollection.insertOne(listingData);
-        
+
         if (result.insertedId) {
-          const createdListing = await listingsCollection.findOne({ _id: result.insertedId });
+          const createdListing = await listingsCollection.findOne({
+            _id: result.insertedId,
+          });
           res.status(201).json({
             message: "Listing created successfully",
             listing: transformListing(createdListing),
@@ -144,27 +159,10 @@ async function run() {
         }
       } catch (error) {
         console.error("Error creating listing:", error);
-        res.status(500).json({ 
-          message: "Error creating listing", 
-          error: error.message 
+        res.status(500).json({
+          message: "Error creating listing",
+          error: error.message,
         });
-      }
-    });
-
-    app.get("/listings/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const query = { _id: new ObjectId(id) };
-        const listing = await listingsCollection.findOne(query);
-        
-        if (!listing) {
-          return res.status(404).json({ message: "Listing not found" });
-        }
-        
-        res.send(transformListing(listing));
-      } catch (error) {
-        console.error("Error fetching listing:", error);
-        res.status(500).json({ message: "Error fetching listing", error: error.message });
       }
     });
 
@@ -172,7 +170,7 @@ async function run() {
     app.get("/listing/:id", async (req, res) => {
       try {
         const id = req.params.id;
-        
+
         // Handle MongoDB ObjectId format
         let query;
         try {
@@ -180,17 +178,19 @@ async function run() {
         } catch (error) {
           return res.status(400).json({ message: "Invalid listing ID format" });
         }
-        
+
         const listing = await listingsCollection.findOne(query);
-        
+
         if (!listing) {
           return res.status(404).json({ message: "Listing not found" });
         }
-        
+
         res.json(transformListing(listing));
       } catch (error) {
         console.error("Error fetching listing:", error);
-        res.status(500).json({ message: "Error fetching listing", error: error.message });
+        res
+          .status(500)
+          .json({ message: "Error fetching listing", error: error.message });
       }
     });
 
@@ -273,14 +273,21 @@ async function run() {
       try {
         const { email } = req.query;
         if (!email) {
-          return res.status(400).json({ message: "email query parameter is required" });
+          return res
+            .status(400)
+            .json({ message: "email query parameter is required" });
         }
 
-        const orders = await ordersCollection.find({ email }).sort({ createdAt: -1 }).toArray();
+        const orders = await ordersCollection
+          .find({ email })
+          .sort({ createdAt: -1 })
+          .toArray();
         res.json(orders.map(transformOrder));
       } catch (error) {
         console.error("Error fetching orders:", error);
-        res.status(500).json({ message: "Error fetching orders", error: error.message });
+        res
+          .status(500)
+          .json({ message: "Error fetching orders", error: error.message });
       }
     });
 
@@ -289,14 +296,19 @@ async function run() {
       try {
         const { userId } = req.query;
         if (!userId) {
-          return res.status(400).json({ message: "userId query parameter is required" });
+          return res
+            .status(400)
+            .json({ message: "userId query parameter is required" });
         }
 
         const listings = await listingsCollection.find({ userId }).toArray();
         res.json(listings.map(transformListing));
       } catch (error) {
         console.error("Error fetching user listings:", error);
-        res.status(500).json({ message: "Error fetching user listings", error: error.message });
+        res.status(500).json({
+          message: "Error fetching user listings",
+          error: error.message,
+        });
       }
     });
 
@@ -332,16 +344,27 @@ async function run() {
         }
 
         if (existingListing.userId && existingListing.userId !== userId) {
-          return res.status(403).json({ message: "You are not authorized to update this listing" });
+          return res
+            .status(403)
+            .json({ message: "You are not authorized to update this listing" });
         }
 
-        if (!name || !category || !location || !description || !imageUrl || !pickupDate) {
+        if (
+          !name ||
+          !category ||
+          !location ||
+          !description ||
+          !imageUrl ||
+          !pickupDate
+        ) {
           return res.status(400).json({
-            message: "Missing required fields: name, category, location, description, imageUrl, pickupDate",
+            message:
+              "Missing required fields: name, category, location, description, imageUrl, pickupDate",
           });
         }
 
-        const numericPrice = typeof price === "number" ? price : parseFloat(price) || 0;
+        const numericPrice =
+          typeof price === "number" ? price : parseFloat(price) || 0;
 
         const updateDoc = {
           name,
@@ -364,7 +387,9 @@ async function run() {
         });
       } catch (error) {
         console.error("Error updating listing:", error);
-        res.status(500).json({ message: "Error updating listing", error: error.message });
+        res
+          .status(500)
+          .json({ message: "Error updating listing", error: error.message });
       }
     });
 
@@ -391,18 +416,22 @@ async function run() {
         }
 
         if (existingListing.userId && existingListing.userId !== userId) {
-          return res.status(403).json({ message: "You are not authorized to delete this listing" });
+          return res
+            .status(403)
+            .json({ message: "You are not authorized to delete this listing" });
         }
 
         await listingsCollection.deleteOne(query);
         res.json({ message: "Listing deleted successfully" });
       } catch (error) {
         console.error("Error deleting listing:", error);
-        res.status(500).json({ message: "Error deleting listing", error: error.message });
+        res
+          .status(500)
+          .json({ message: "Error deleting listing", error: error.message });
       }
     });
 
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
