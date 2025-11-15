@@ -58,7 +58,10 @@ async function run() {
     const ordersCollection = database.collection("Orders");
 
     app.get("/listings", async (req, res) => {
-      const result = await listingsCollection.find().toArray();
+      const result = await listingsCollection
+        .find()
+        .sort({ _id: -1 })
+        .toArray();
       res.send(result);
     });
 
@@ -113,6 +116,17 @@ async function run() {
       const { email } = req.query;
       const result = await ordersCollection.find({ email }).toArray();
       res.send(result);
+    });
+
+    // Delete an order
+    app.delete("/orders/:id", verifyToken, async (req, res) => {
+      const { id } = req.params;
+      const objectId = new ObjectId(id);
+      const result = await ordersCollection.deleteOne({ _id: objectId });
+      res.send({
+        success: true,
+        result,
+      });
     });
 
     // Get listings by user
