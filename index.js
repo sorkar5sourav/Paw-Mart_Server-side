@@ -2,8 +2,14 @@ const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const admin = require("firebase-admin");
-const serviceAccount = require("./paw-mart-service-account.json");
+const serviceAccount = require("./Paw-mart_serviceKey.json");
 require("dotenv").config();
+
+// Initialize Firebase Admin with service account
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
 const app = express();
 const port = process.env.PORT || 3000;
 app.use(cors());
