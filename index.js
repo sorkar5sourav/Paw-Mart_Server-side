@@ -1,12 +1,13 @@
 const express = require("express");
+const cors = require("cors");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
+const admin = require("firebase-admin");
+const serviceAccount = require("./paw-mart-service-account.json");
 require("dotenv").config();
 const app = express();
 const port = process.env.PORT || 3000;
-const cors = require("cors");
 app.use(cors());
 app.use(express.json());
-const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-const admin = require("firebase-admin");
 
 const uri = process.env.MONGODB_URI;
 if (!uri) {
@@ -20,6 +21,27 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+
+const verifyToken = async (req, res, next) => {
+  const authorization = req.headers.authorization;
+
+  if (!authorization) {
+    return res.status(401).send({
+      message: "unauthorized access. Token not found!",
+    });
+  }
+
+  const token = authorization.split(" ")[1];
+  try {
+    await admin.auth().verifyIdToken(token);
+
+    next();
+  } catch (error) {
+    res.status(401).send({
+      message: "unauthorized access.",
+    });
+  }
+};
 
 async function run() {
   try {
@@ -35,7 +57,7 @@ async function run() {
     });
 
     // Create a new listing
-    app.post("/listings", async (req, res) => {
+    app.post("/listings", verifyToken, async (req, res) => {
       const data = req.body;
       const result = await listingsCollection.insertOne(data);
       res.send({
@@ -45,7 +67,7 @@ async function run() {
     });
 
     // Get single listing by ID (singular endpoint)
-    app.get("/listing/:id", async (req, res) => {
+    app.get("/listing/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
       const objectId = new ObjectId(id);
       const result = await listingsCollection.findOne({ _id: objectId });
@@ -56,7 +78,7 @@ async function run() {
     });
 
     // Update a listing
-    app.put("/listings/:id", async (req, res) => {
+    app.put("/listings/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
       const data = req.body;
       const objectId = new ObjectId(id);
@@ -71,7 +93,7 @@ async function run() {
       });
     });
     // Create a new order
-    app.post("/orders", async (req, res) => {
+    app.post("/orders", verifyToken, async (req, res) => {
       const data = req.body;
       const result = await ordersCollection.insertOne(data);
       res.send({
@@ -81,21 +103,21 @@ async function run() {
     });
 
     // Get orders by user email
-    app.get("/orders", async (req, res) => {
+    app.get("/orders", verifyToken, async (req, res) => {
       const { email } = req.query;
       const result = await ordersCollection.find({ email }).toArray();
       res.send(result);
     });
 
     // Get listings by user
-    app.get("/user-listings", async (req, res) => {
+    app.get("/user-listings", verifyToken, async (req, res) => {
       const { userId } = req.query;
       const result = await listingsCollection.find({ userId }).toArray();
       res.send(result);
     });
 
     // Delete a listing
-    app.delete("/listings/:id", async (req, res) => {
+    app.delete("/listings/:id", verifyToken, async (req, res) => {
       const { id } = req.params;
       const result = await listingsCollection.deleteOne({
         _id: new ObjectId(id),
