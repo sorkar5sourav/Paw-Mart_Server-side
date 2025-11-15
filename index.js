@@ -2,26 +2,13 @@ const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const admin = require("firebase-admin");
+const serviceAccount = require("./Paw-mart_serviceKey.json");
 require("dotenv").config();
 
-// Initialize Firebase Admin
-try {
-  const serviceAccount = require("./Paw-mart_serviceKey.json");
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-  console.log("Firebase Admin initialized successfully");
-} catch (error) {
-  console.error("Error initializing Firebase Admin:", error.message);
-  // If service account file doesn't exist, try to use default credentials
-  try {
-    admin.initializeApp();
-    console.log("Firebase Admin initialized with default credentials");
-  } catch (defaultError) {
-    console.error("Failed to initialize Firebase Admin:", defaultError.message);
-    throw new Error("Firebase Admin initialization failed");
-  }
-}
+// Initialize Firebase Admin with service account
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -41,15 +28,6 @@ const client = new MongoClient(uri, {
   },
 });
 
-// Helper function for 500 errors
-const handleServerError = (res, error, operation = "operation") => {
-  console.error(`Error in ${operation}:`, error);
-  res.status(500).send({
-    success: false,
-    message: "Internal server error",
-  });
-};
-
 const verifyToken = async (req, res, next) => {
   const authorization = req.headers.authorization;
 
@@ -61,8 +39,8 @@ const verifyToken = async (req, res, next) => {
 
   const token = authorization.split(" ")[1];
   try {
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    req.user = decodedToken; // Attach user info to request
+    await admin.auth().verifyIdToken(token);
+
     next();
   } catch (error) {
     res.status(401).send({
@@ -80,240 +58,94 @@ async function run() {
     const ordersCollection = database.collection("Orders");
 
     app.get("/listings", async (req, res) => {
-      try {
-        const result = await listingsCollection.find().toArray();
-        res.send(result);
-      } catch (error) {
-        handleServerError(res, error, "fetching listings");
-      }
+      const result = await listingsCollection
+        .find()
+        .sort({ _id: -1 })
+        .toArray();
+      res.send(result);
     });
 
     // Create a new listing
     app.post("/listings", verifyToken, async (req, res) => {
-      try {
-        const data = req.body;
-        const result = await listingsCollection.insertOne(data);
-        res.send({
-          success: true,
-          result,
-        });
-      } catch (error) {
-        handleServerError(res, error, "creating listing");
-      }
+      const data = req.body;
+      const result = await listingsCollection.insertOne(data);
+      res.send({
+        success: true,
+        result,
+      });
     });
 
     // Get single listing by ID (singular endpoint)
     app.get("/listing/:id", verifyToken, async (req, res) => {
-      try {
-        const { id } = req.params;
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({
-            success: false,
-            message: "Invalid listing ID format",
-          });
-        }
-        const objectId = new ObjectId(id);
-        const result = await listingsCollection.findOne({ _id: objectId });
-        if (!result) {
-          return res.status(404).send({
-            success: false,
-            message: "Listing not found",
-          });
-        }
-        res.send({
-          success: true,
-          result,
-        });
-      } catch (error) {
-        handleServerError(res, error, "fetching listing");
-      }
+      const { id } = req.params;
+      const objectId = new ObjectId(id);
+      const result = await listingsCollection.findOne({ _id: objectId });
+      res.send({
+        success: true,
+        result,
+      });
     });
 
     // Update a listing
     app.put("/listings/:id", verifyToken, async (req, res) => {
-      try {
-        const { id } = req.params;
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({
-            success: false,
-            message: "Invalid listing ID format",
-          });
-        }
-        const userEmail = req.user.email;
-        const objectId = new ObjectId(id);
-
-        // Check if listing exists and belongs to user
-        const listing = await listingsCollection.findOne({ _id: objectId });
-        if (!listing) {
-          return res.status(404).send({
-            success: false,
-            message: "Listing not found",
-          });
-        }
-
-        if (listing.userId !== req.user.uid && listing.email !== userEmail) {
-          return res.status(403).send({
-            success: false,
-            message:
-              "Forbidden: You do not have permission to update this listing",
-          });
-        }
-
-        const data = req.body;
-        const filter = { _id: objectId };
-        const update = {
-          $set: data,
-        };
-        const result = await listingsCollection.updateOne(filter, update);
-        res.send({
-          success: true,
-          result,
-        });
-      } catch (error) {
-        handleServerError(res, error, "updating listing");
-      }
+      const { id } = req.params;
+      const data = req.body;
+      const objectId = new ObjectId(id);
+      const filter = { _id: objectId };
+      const update = {
+        $set: data,
+      };
+      const result = await listingsCollection.updateOne(filter, update);
+      res.send({
+        success: true,
+        result,
+      });
     });
     // Create a new order
     app.post("/orders", verifyToken, async (req, res) => {
-      try {
-        const data = req.body;
-        // Ensure status is set, default to "pending" if not provided
-        if (!data.status) {
-          data.status = "pending";
-        }
-        const result = await ordersCollection.insertOne(data);
-        res.send({
-          success: true,
-          result,
-        });
-      } catch (error) {
-        handleServerError(res, error, "creating order");
-      }
+      const data = req.body;
+      const result = await ordersCollection.insertOne(data);
+      res.send({
+        success: true,
+        result,
+      });
     });
 
     // Get orders by user email
     app.get("/orders", verifyToken, async (req, res) => {
-      try {
-        const { email } = req.query;
-        const userEmail = req.user.email;
-
-        // Ensure users can only access their own orders
-        if (email !== userEmail) {
-          return res.status(403).send({
-            success: false,
-            message: "Forbidden: You can only access your own orders",
-          });
-        }
-
-        const result = await ordersCollection.find({ email }).toArray();
-        res.send(result);
-      } catch (error) {
-        handleServerError(res, error, "fetching orders");
-      }
-    });
-
-    // Get listings by user
-    app.get("/user-listings", verifyToken, async (req, res) => {
-      try {
-        const { userId } = req.query;
-
-        // Ensure users can only access their own listings
-        if (userId !== req.user.uid) {
-          return res.status(403).send({
-            success: false,
-            message: "Forbidden: You can only access your own listings",
-          });
-        }
-
-        const result = await listingsCollection.find({ userId }).toArray();
-        res.send(result);
-      } catch (error) {
-        handleServerError(res, error, "fetching user listings");
-      }
-    });
-
-    // Delete a listing
-    app.delete("/listings/:id", verifyToken, async (req, res) => {
-      try {
-        const { id } = req.params;
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({
-            success: false,
-            message: "Invalid listing ID format",
-          });
-        }
-        const userEmail = req.user.email;
-        const objectId = new ObjectId(id);
-
-        // Check if listing exists and belongs to user
-        const listing = await listingsCollection.findOne({ _id: objectId });
-        if (!listing) {
-          return res.status(404).send({
-            success: false,
-            message: "Listing not found",
-          });
-        }
-
-        if (listing.userId !== req.user.uid && listing.email !== userEmail) {
-          return res.status(403).send({
-            success: false,
-            message:
-              "Forbidden: You do not have permission to delete this listing",
-          });
-        }
-
-        const result = await listingsCollection.deleteOne({
-          _id: objectId,
-        });
-        res.send({
-          success: true,
-          result,
-        });
-      } catch (error) {
-        handleServerError(res, error, "deleting listing");
-      }
+      const { email } = req.query;
+      const result = await ordersCollection.find({ email }).toArray();
+      res.send(result);
     });
 
     // Delete an order
     app.delete("/orders/:id", verifyToken, async (req, res) => {
-      try {
-        const { id } = req.params;
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({
-            success: false,
-            message: "Invalid order ID format",
-          });
-        }
-        const userEmail = req.user.email;
-        const objectId = new ObjectId(id);
+      const { id } = req.params;
+      const objectId = new ObjectId(id);
+      const result = await ordersCollection.deleteOne({ _id: objectId });
+      res.send({
+        success: true,
+        result,
+      });
+    });
 
-        // Check if order exists and belongs to user
-        const order = await ordersCollection.findOne({ _id: objectId });
-        if (!order) {
-          return res.status(404).send({
-            success: false,
-            message: "Order not found",
-          });
-        }
+    // Get listings by user
+    app.get("/user-listings", verifyToken, async (req, res) => {
+      const { userId } = req.query;
+      const result = await listingsCollection.find({ userId }).toArray();
+      res.send(result);
+    });
 
-        if (order.email !== userEmail) {
-          return res.status(403).send({
-            success: false,
-            message:
-              "Forbidden: You do not have permission to delete this order",
-          });
-        }
-
-        const result = await ordersCollection.deleteOne({
-          _id: objectId,
-        });
-        res.send({
-          success: true,
-          result,
-        });
-      } catch (error) {
-        handleServerError(res, error, "deleting order");
-      }
+    // Delete a listing
+    app.delete("/listings/:id", verifyToken, async (req, res) => {
+      const { id } = req.params;
+      const result = await listingsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send({
+        success: true,
+        result,
+      });
     });
 
     // await client.db("admin").command({ ping: 1 });
