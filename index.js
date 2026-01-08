@@ -15,6 +15,17 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Simple request logger to help debug incoming requests and auth header presence
+app.use((req, res, next) => {
+  const authPresent = !!req.headers.authorization;
+  console.log(
+    `[${new Date().toISOString()}] ${req.method} ${
+      req.path
+    } - auth:${authPresent}`
+  );
+  next();
+});
+
 const uri = process.env.MONGODB_URI;
 if (!uri) {
   throw new Error("Missing MONGODB_URI environment variable");
@@ -32,6 +43,7 @@ const verifyToken = async (req, res, next) => {
   const authorization = req.headers.authorization;
 
   if (!authorization) {
+    console.log("verifyToken: authorization header missing");
     return res
       .status(401)
       .send({ message: "unauthorized access. Token not found!" });
@@ -42,8 +54,17 @@ const verifyToken = async (req, res, next) => {
     const decoded = await admin.auth().verifyIdToken(token);
     // attach decoded token to request for downstream checks
     req.decodedToken = decoded;
+    console.log(
+      `verifyToken: decoded uid=${decoded.uid || "<no-uid>"} email=${
+        decoded.email || "<no-email>"
+      }`
+    );
     next();
   } catch (error) {
+    console.error(
+      "verifyToken error:",
+      error && error.message ? error.message : error
+    );
     res.status(401).send({ message: "unauthorized access." });
   }
 };
@@ -91,18 +112,48 @@ async function run() {
     });
 
     // Create a new listing (user must be authenticated). Listings require admin approval before public listing.
+    // Non-admin users can ONLY post pet adoption listings. Products require admin role.
     app.post("/listings", verifyToken, async (req, res) => {
-      const data = req.body || {};
-      const decoded = req.decodedToken || {};
-      const listing = {
-        ...data,
-        userId: decoded.uid || data.userId,
-        email: decoded.email || data.email,
-        status: "pending",
-        createdAt: new Date(),
-      };
-      const result = await listingsCollection.insertOne(listing);
-      res.send({ success: true, result });
+      try {
+        const data = req.body || {};
+        const decoded = req.decodedToken || {};
+        const category = data.category || "";
+
+        // Check if non-admin user is trying to post non-Pets category
+        if (category !== "Pets") {
+          const userRecord = await usersCollection.findOne({
+            uid: decoded.uid,
+          });
+          if (!userRecord || userRecord.role !== "admin") {
+            console.log(
+              `[POST /listings] Non-admin user ${decoded.uid} attempted to post category: ${category}`
+            );
+            return res.status(403).send({
+              success: false,
+              message:
+                "Only administrators can post products. Users can only post pet adoptions.",
+            });
+          }
+        }
+
+        const listing = {
+          ...data,
+          userId: decoded.uid || data.userId,
+          email: decoded.email || data.email,
+          status: "pending",
+          createdAt: new Date(),
+        };
+        console.log(
+          `[POST /listings] Creating listing - user: ${decoded.uid}, category: ${category}`
+        );
+        const result = await listingsCollection.insertOne(listing);
+        res.send({ success: true, result });
+      } catch (error) {
+        console.error("POST /listings error:", error);
+        res
+          .status(500)
+          .send({ success: false, message: "Internal server error" });
+      }
     });
 
     // Get single listing by ID (public)
@@ -185,6 +236,41 @@ async function run() {
       });
     });
 
+    // Update order status (admin only)
+    app.patch(
+      "/orders/:id/status",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+          const { status } = req.body;
+
+          if (!status) {
+            return res.status(400).send({ message: "status required" });
+          }
+
+          const objectId = new ObjectId(id);
+          const result = await ordersCollection.updateOne(
+            { _id: objectId },
+            { $set: { status, updatedAt: new Date() } }
+          );
+
+          if (result.matchedCount === 0) {
+            return res.status(404).send({ message: "order not found" });
+          }
+
+          res.send({
+            success: true,
+            result,
+          });
+        } catch (err) {
+          console.error("Order status update error:", err);
+          res.status(500).send({ success: false, message: "internal error" });
+        }
+      }
+    );
+
     // Get listings by user (owner) or admin
     app.get("/user-listings", verifyToken, async (req, res) => {
       const { userId } = req.query;
@@ -226,6 +312,44 @@ async function run() {
 
       const result = await listingsCollection.deleteOne({ _id: objectId });
       res.send({ success: true, result });
+    });
+
+    // Update a listing (owner or admin)
+    app.put("/listings/:id", verifyToken, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const objectId = new ObjectId(id);
+        const existing = await listingsCollection.findOne({ _id: objectId });
+        const decoded = req.decodedToken || {};
+
+        if (!existing)
+          return res.status(404).send({ success: false, message: "Not found" });
+
+        // Check if requester is owner or admin
+        if (existing.userId !== decoded.uid) {
+          const userRecord = await usersCollection.findOne({
+            uid: decoded.uid,
+          });
+          if (!userRecord || userRecord.role !== "admin") {
+            return res.status(403).send({ message: "forbidden" });
+          }
+        }
+
+        const updateData = req.body || {};
+        // Prevent changing userId and status
+        delete updateData.userId;
+        delete updateData.status;
+
+        const result = await listingsCollection.updateOne(
+          { _id: objectId },
+          { $set: { ...updateData, updatedAt: new Date() } }
+        );
+
+        res.send({ success: true, result });
+      } catch (err) {
+        console.error("Listing update error:", err);
+        res.status(500).send({ success: false, message: "internal error" });
+      }
     });
 
     // Admin: list all listings (including pending)
@@ -340,6 +464,11 @@ async function run() {
       try {
         const payload = req.body || {};
         const decoded = req.decodedToken || {};
+        console.log("POST /users called", {
+          payloadPresent: Object.keys(payload).length > 0,
+          decodedUid: decoded.uid,
+          decodedEmail: decoded.email,
+        });
         const uid = decoded.uid || payload.uid;
         const email = decoded.email || payload.email;
         if (!uid || !email)
@@ -361,6 +490,34 @@ async function run() {
         res.send({ success: true, result });
       } catch (err) {
         console.error("/users upsert error:", err);
+        res.status(500).send({ success: false, message: "internal error" });
+      }
+    });
+
+    // Get user profile by uid (authenticated users only)
+    app.get("/user-profile", verifyToken, async (req, res) => {
+      try {
+        const decoded = req.decodedToken || {};
+        const uid = decoded.uid;
+
+        if (!uid) {
+          return res.status(400).send({ message: "uid required" });
+        }
+
+        const userRecord = await usersCollection.findOne({ uid });
+        if (!userRecord) {
+          // User not found, return default user profile
+          return res.send({
+            uid,
+            email: decoded.email,
+            displayName: decoded.name || "",
+            role: "user", // Default role
+          });
+        }
+
+        res.send(userRecord);
+      } catch (err) {
+        console.error("/user-profile error:", err);
         res.status(500).send({ success: false, message: "internal error" });
       }
     });
